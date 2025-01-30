@@ -1,2 +1,2 @@
 # Universal
-Enterprise-grade next-generational and high-performance relational distributed object runtime for databases and microservices.
+Universal, Very lightweight and fast ORM/ODM for databases such as MySQL, SQLite and MongoDB.
