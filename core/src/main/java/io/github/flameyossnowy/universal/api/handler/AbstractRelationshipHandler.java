@@ -55,7 +55,7 @@ public abstract class AbstractRelationshipHandler<T, ID, R> implements Relations
         if (primaryKey == null) throw new IllegalStateException("Missing primary key for " + parentInfo.getType());
 
         SelectQuery query = Query.select()
-                .where(primaryKey.name(), primaryKeyValue)
+                .where(primaryKey.name()).eq(primaryKeyValue)
                 .limit(1)
                 .build();
 
@@ -128,7 +128,7 @@ public abstract class AbstractRelationshipHandler<T, ID, R> implements Relations
     }
 
     private List<Object> getResult(ID primaryKeyValue, @NotNull RepositoryAdapter<Object, Object, ?> adapter, String relationName, String cacheKey) {
-        List<Object> result = adapter.find(Query.select().where(relationName, primaryKeyValue).build());
+        List<Object> result = adapter.find(Query.select().where(relationName).eq(primaryKeyValue).build());
         List<Object> immutable = result == null ? Collections.emptyList() : List.copyOf(result);
         relationshipCache.put(cacheKey, immutable);
         return immutable;
@@ -214,7 +214,7 @@ public abstract class AbstractRelationshipHandler<T, ID, R> implements Relations
 
         List<Object> results = adapter.find(
             Query.select()
-                .whereIn(backRef.name(), parentIds)
+                .where(Objects.requireNonNull(backRef).name()).in(parentIds)
                 .build()
         );
 
@@ -244,7 +244,7 @@ public abstract class AbstractRelationshipHandler<T, ID, R> implements Relations
 
         List<Object> results = adapter.find(
             Query.select()
-                .whereIn(relationName, parentIds)
+                .where(relationName).in(parentIds)
                 .build()
         );
 
