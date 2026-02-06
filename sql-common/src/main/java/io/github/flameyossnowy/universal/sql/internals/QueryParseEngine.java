@@ -266,6 +266,7 @@ public class QueryParseEngine {
         Logging.deepInfo(() -> "Starting repository parse: " + repositoryInformation.getRepositoryName());
         Logging.deepInfo(() -> "IF NOT EXISTS = " + ifNotExists);
 
+        @SuppressWarnings("MismatchedQueryAndUpdateOfCollection") // u lyin
         Set<FieldData<?>> childTableQueue = new HashSet<>(4);
 
         String tableName = repositoryInformation.getRepositoryName();

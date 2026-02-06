@@ -98,7 +98,7 @@ public class DefaultSession<ID, T, C> implements DatabaseSession<ID, T, C> {
 
     @Override
     public boolean insert(T entity) {
-        ID entityId = information.getPrimaryKey().getValue(entity);
+        ID entityId = Objects.requireNonNull(information.getPrimaryKey()).getValue(entity);
 
         Runnable operation = () -> {
             TransactionResult<Boolean> result = repository.insert(entity, transactionContext);
@@ -123,7 +123,7 @@ public class DefaultSession<ID, T, C> implements DatabaseSession<ID, T, C> {
 
     @Override
     public boolean delete(T entity) {
-        ID entityId = information.getPrimaryKey().getValue(entity);
+        ID entityId = Objects.requireNonNull(information.getPrimaryKey()).getValue(entity);
         T previous = findById(entityId);
 
         Runnable operation = () -> {
@@ -151,7 +151,7 @@ public class DefaultSession<ID, T, C> implements DatabaseSession<ID, T, C> {
 
     @Override
     public boolean update(T entity) {
-        ID entityId = information.getPrimaryKey().getValue(entity);
+        ID entityId = Objects.requireNonNull(information.getPrimaryKey()).getValue(entity);
         T previous = findById(entityId);
 
         Runnable operation = () -> {

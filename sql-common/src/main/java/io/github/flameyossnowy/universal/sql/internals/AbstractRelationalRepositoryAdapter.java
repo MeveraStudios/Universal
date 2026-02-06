@@ -228,7 +228,7 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
     @Override
     public T findById(ID key) {
         FieldData<?> primaryKey = validatePrimaryKey();
-        if (!cacheEnabled) return first(Query.select().where(primaryKey.name(), key).build());
+        if (!cacheEnabled) return first(Query.select().where(primaryKey.name()).eq(key).build());
 
         // Check L2 cache first
         T cached = l2Cache.get(key);
@@ -237,7 +237,7 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
             return cached;
         }
         
-        T entity = first(Query.select().where(primaryKey.name(), key).build());
+        T entity = first(Query.select().where(primaryKey.name()).eq(key).build());
         
         if (entity != null) {
             l2Cache.put(key, entity);
@@ -259,7 +259,7 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
             return Collections.singletonMap(next, findById(next));
         }
 
-        SelectQuery query = Query.select().where(primaryKey.name(), keys).build();
+        SelectQuery query = Query.select().where(primaryKey.name()).in(keys).build();
         String s = engine.parseSelect(query, false);
 
         List<T> ts = executeQueryWithParams(s, false, query, query.filters());
@@ -364,7 +364,7 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
      */
     private T loadFromDatabase(ID key) {
         FieldData<?> primaryKey = validatePrimaryKey();
-        return first(Query.select().where(primaryKey.name(), key).build());
+        return first(Query.select().where(primaryKey.name()).eq(key).build());
     }
 
     @Override

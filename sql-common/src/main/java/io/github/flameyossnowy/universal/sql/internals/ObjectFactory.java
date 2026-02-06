@@ -350,6 +350,7 @@ public sealed abstract class ObjectFactory<T, ID>
 
     protected ID resolvePrimaryKey(SQLDatabaseResult result) {
         FieldData<?> pk = repoInfo.getPrimaryKey();
+        @SuppressWarnings("DataFlowIssue") // pk is guaranteed to not be null by contract
         TypeResolver<ID> resolver = (TypeResolver<ID>) typeResolverRegistry.resolve(pk.type());
         return resolver.resolve(result, pk.name());
     }
@@ -362,6 +363,7 @@ public sealed abstract class ObjectFactory<T, ID>
     protected Object resolveFieldValue(@NotNull FieldData<?> field, SQLDatabaseResult result) {
         RepositoryInformation related = RepositoryMetadata.getMetadata(field.type());
         FieldData<?> target = related != null ? related.getPrimaryKey() : field;
+        if (target == null) return null;
 
         TypeResolver<Object> resolver =
             (TypeResolver<Object>) typeResolverRegistry.resolve(target.type());
@@ -372,8 +374,9 @@ public sealed abstract class ObjectFactory<T, ID>
     private TypeResolver<Object> getTypeResolverForField(@NotNull FieldData<?> field, Object value) {
         if ((field.oneToOne() != null || field.manyToOne() != null) && value != null) {
             RepositoryInformation related = RepositoryMetadata.getMetadata(field.type());
+            if (related == null) return null;
             return (TypeResolver<Object>) typeResolverRegistry.resolve(
-                related.getPrimaryKey().type()
+                Objects.requireNonNull(related.getPrimaryKey()).type()
             );
         }
         return (TypeResolver<Object>) typeResolverRegistry.resolve(field.type());

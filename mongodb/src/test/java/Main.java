@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.UUID;
 
 public class Main {
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) {
         MongoClientSettings settings = MongoClientSettings.builder()
             .applyConnectionString(new ConnectionString(
                 "mongodb+srv://flameyosflow:87654321@testingjava.vmol6.mongodb.net/?retryWrites=true&w=majority&appName=TestingJava&ssl=false"
@@ -32,7 +32,7 @@ public class Main {
         List<User> users = new ArrayList<>();
 
         Instant five = Instant.parse("2025-02-06T16:45:43.767Z");
-        for (int i = 0; i < 1; i++) {
+        for (int i = 0; i < 10; i++) {
             if (i % 2 == 0) {
                 users.add(new User(UUID.randomUUID(), "Flameyos" + i, 17, five));
             } else {
@@ -43,7 +43,8 @@ public class Main {
 
         for (User user : users) {
             System.out.println("Inserting user: " + user);
-            adapter.insert(user);
+            adapter.insert(user)
+                    .ifError((error) -> System.err.println("Error inserting user: " + error.getMessage()));
             System.out.println("inserted");
         }
 

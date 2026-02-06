@@ -11,13 +11,13 @@ import io.github.flameyossnowy.universal.api.cache.DefaultSessionCache;
 import io.github.flameyossnowy.universal.api.cache.SessionCache;
 import io.github.flameyossnowy.universal.api.reflect.RepositoryInformation;
 import io.github.flameyossnowy.universal.api.reflect.RepositoryMetadata;
-import org.bson.Document;
 import org.bson.conversions.Bson;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.Objects;
 import java.util.function.LongFunction;
 
+@SuppressWarnings("unused")
 public class MongoRepositoryAdapterBuilder<T, ID> {
     private MongoClientSettings.Builder credentialsBuilder;
     private final Class<T> repository;

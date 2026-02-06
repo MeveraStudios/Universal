@@ -209,8 +209,10 @@ public abstract class AbstractRelationshipHandler<T, ID, R> implements Relations
 
     private void batchLoadOneToOne(FieldData<?> field, List<ID> parentIds) {
         RepositoryInformation target = getMetadata(field.type());
+        if (target == null) return;
         OneToOneField backRef = getOneToOneField(target, repositoryInformation);
         RepositoryAdapter<Object, Object, ?> adapter = resolveAdapter(field, target);
+        if (adapter == null) return;
 
         List<Object> results = adapter.find(
             Query.select()
@@ -238,7 +240,9 @@ public abstract class AbstractRelationshipHandler<T, ID, R> implements Relations
 
     private void batchLoadOneToMany(FieldData<?> field, List<ID> parentIds) {
         RepositoryInformation related = getMetadata(field.oneToMany().mappedBy());
+        if (related == null) return;
         RepositoryAdapter<Object, Object, ?> adapter = resolveAdapter(field, related);
+        if (adapter == null) return;
 
         String relationName = getRelationName(related, repositoryInformation.getType());
 
@@ -268,7 +272,7 @@ public abstract class AbstractRelationshipHandler<T, ID, R> implements Relations
         Map<FieldData<?>, List<ID>> oneToOne = new HashMap<>(32);
 
         for (Object parent : parents) {
-            ID id = repositoryInformation.getPrimaryKey().getValue(parent);
+            ID id = Objects.requireNonNull(repositoryInformation.getPrimaryKey()).getValue(parent);
 
             for (FieldData<?> field : repositoryInformation.getFields()) {
                 if (!fields.contains(field.name())) continue;

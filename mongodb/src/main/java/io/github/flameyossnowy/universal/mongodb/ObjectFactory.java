@@ -9,7 +9,6 @@ import io.github.flameyossnowy.universal.api.reflect.FieldData;
 import io.github.flameyossnowy.universal.api.reflect.RepositoryInformation;
 import io.github.flameyossnowy.universal.api.reflect.RepositoryMetadata;
 import io.github.flameyossnowy.universal.api.resolver.TypeResolverRegistry;
-import io.github.flameyossnowy.universal.api.utils.Logging;
 import io.github.flameyossnowy.universal.mongodb.codec.MongoTypeCodec;
 import io.github.flameyossnowy.universal.mongodb.result.MongoDatabaseResult;
 import org.bson.Document;
@@ -206,7 +205,7 @@ public class ObjectFactory<T, ID> {
                 } else if (field.oneToOne() != null) {
                     loadOneToOne(field, entity, doc, entityId, loadingContext);
                 } else if (field.oneToMany() != null) {
-                    loadOneToMany(field, entity, entityId, loadingContext);
+                    loadOneToMany(field, entity, entityId);
                 }
             }
         } finally {
@@ -305,7 +304,7 @@ public class ObjectFactory<T, ID> {
         if (adapter == null) return;
 
         Object result = adapter.first(
-            Query.select().where("_id", foreignKeyValue).build()
+            Query.select().where("_id").eq(foreignKeyValue).build()
         );
 
         if (result != null) {
@@ -334,7 +333,7 @@ public class ObjectFactory<T, ID> {
             if (owningField == null) return;
 
             Object child = adapter.first(
-                Query.select().where(owningField.name(), id).build()
+                Query.select().where(owningField.name()).eq(id).build()
             );
 
             if (child != null) {
@@ -351,7 +350,7 @@ public class ObjectFactory<T, ID> {
         if (loadingContext.contains(key)) return;
 
         Object child = adapter.first(
-            Query.select().where("_id", foreignKeyValue).build()
+            Query.select().where("_id").eq(foreignKeyValue).build()
         );
 
         if (child != null) {
@@ -362,13 +361,13 @@ public class ObjectFactory<T, ID> {
     private void loadOneToMany(
         FieldData<?> field,
         Object parentEntity,
-        ID parentId,
-        Set<LoadingKey> loadingContext
+        ID parentId
     ) {
         if (parentId == null) return;
 
         Class<?> childType = field.oneToMany().mappedBy();
         RepositoryInformation childInfo = RepositoryMetadata.getMetadata(childType);
+        if (childInfo == null) return;
         var adapter = RepositoryRegistry.get(childType);
         if (adapter == null) return;
 
@@ -378,7 +377,7 @@ public class ObjectFactory<T, ID> {
         if (manyToOneField == null) return;
 
         SelectQuery query = Query.select()
-            .where(manyToOneField.name(), parentId)
+            .where(manyToOneField.name()).eq(parentId)
             .build();
 
         List<Object> children = new ArrayList<>();
