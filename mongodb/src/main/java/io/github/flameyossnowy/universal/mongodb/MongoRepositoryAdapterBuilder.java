@@ -3,11 +3,16 @@ package io.github.flameyossnowy.universal.mongodb;
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
+import io.github.flameyossnowy.universal.api.annotations.Cacheable;
 import io.github.flameyossnowy.universal.api.annotations.GlobalCacheable;
 import io.github.flameyossnowy.universal.api.cache.CacheWarmer;
+import io.github.flameyossnowy.universal.api.cache.DefaultResultCache;
 import io.github.flameyossnowy.universal.api.cache.DefaultSessionCache;
 import io.github.flameyossnowy.universal.api.cache.SessionCache;
+import io.github.flameyossnowy.universal.api.reflect.RepositoryInformation;
 import io.github.flameyossnowy.universal.api.reflect.RepositoryMetadata;
+import org.bson.Document;
+import org.bson.conversions.Bson;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.Objects;
@@ -123,36 +128,55 @@ public class MongoRepositoryAdapterBuilder<T, ID> {
      */
     @SuppressWarnings("unchecked")
     public MongoRepositoryAdapter<T, ID> build() {
-        GlobalCacheable cacheable = Objects.requireNonNull(RepositoryMetadata.getMetadata(repository)).getGlobalCacheable();
-        if (cacheable == null)
-            return new MongoRepositoryAdapter<>(
-                    this.credentialsBuilder, database, repository,
-                    idType, null, sessionCacheSupplier, cacheWarmer,
-                client);
+        if (this.credentialsBuilder == null && this.client == null) throw new IllegalArgumentException("Credentials cannot be null");
+        RepositoryInformation information = Objects.requireNonNull(RepositoryMetadata.getMetadata(this.repository));
 
-        Class<?> cacheableClass = cacheable.sessionCache();
+        Cacheable cacheable = information.getCacheable();
+        GlobalCacheable globalCacheable = information.getGlobalCacheable();
 
-        if (cacheableClass == SessionCache.class) {
-            return new MongoRepositoryAdapter<>(
-                    this.credentialsBuilder, database, repository,
-                    idType, new DefaultSessionCache<>(), sessionCacheSupplier, cacheWarmer, client
-            );
+        boolean cacheEnabled = cacheable != null;
+        int maxSize = 0;
+
+        DefaultResultCache<Bson, T, ID> resultCache = null;
+
+        if (cacheEnabled) {
+            maxSize = cacheable.maxCacheSize();
+            resultCache = new DefaultResultCache<>(cacheable.maxCacheSize(), cacheable.algorithm());
         }
 
-        if (!SessionCache.class.isAssignableFrom(cacheableClass)) {
-            throw new IllegalArgumentException("Session cache must implement SessionCache interface.");
+        if (cacheable == null) {
+            return new MongoRepositoryAdapter<>(
+                this.credentialsBuilder, database, repository,
+                idType, null, sessionCacheSupplier, cacheWarmer,
+                client, resultCache, false, 0, null);
         }
 
-        try {
-            return new MongoRepositoryAdapter<>(
-                    this.credentialsBuilder, database, repository, idType,
-                    (SessionCache<ID, T>) cacheableClass.getDeclaredConstructor().newInstance(), sessionCacheSupplier, cacheWarmer, client
-            );
-        } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
-            throw new RuntimeException(e);
-        } catch (NoSuchMethodException e) {
-            throw new IllegalArgumentException("Session cache must have default no-arg constructor.", e);
+
+        if (globalCacheable != null) {
+            Class<?> cacheableClass = globalCacheable.sessionCache();
+            if (!SessionCache.class.isAssignableFrom(cacheableClass)) {
+                throw new IllegalArgumentException("Session cache must implement SessionCache interface.");
+            }
+
+            if (cacheableClass == SessionCache.class) {
+                try {
+                    return new MongoRepositoryAdapter<>(
+                        this.credentialsBuilder, database, repository,
+                        idType, (SessionCache<ID, T>) cacheableClass.getDeclaredConstructor().newInstance(), sessionCacheSupplier,
+                        cacheWarmer, client, resultCache, true, maxSize, cacheable.algorithm()
+                    );
+                } catch (InstantiationException | IllegalAccessException | InvocationTargetException |
+                         NoSuchMethodException e) {
+                    throw new RuntimeException(e);
+                }
+            }
         }
+
+        return new MongoRepositoryAdapter<>(
+                this.credentialsBuilder, database, repository, idType,
+                null, sessionCacheSupplier, cacheWarmer,
+                client, resultCache, true, maxSize, cacheable.algorithm()
+        );
     }
 
     public MongoRepositoryAdapterBuilder<T, ID> setDatabase(final String database) {

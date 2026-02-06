@@ -95,13 +95,13 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
         this.globalCache = globalCache;
         this.cacheEnabled = cacheEnabled;
 
-        Logging.info("Initializing repository: " + repository.getSimpleName());
+        Logging.info(() -> "Initializing repository: " + repository.getSimpleName());
 
         this.repositoryInformation = RepositoryMetadata.getMetadata(repository);
         if (repositoryInformation == null)
             throw new IllegalArgumentException("Could not find repository information for class: " + repository.getSimpleName());
         RepositoryRegistry.register(this.repositoryInformation.getRepositoryName(), this);
-        Logging.deepInfo("Repository information: " + repositoryInformation);
+        Logging.deepInfo(() -> "Repository information: " + repositoryInformation);
 
         this.resolverRegistry = new TypeResolverRegistry();
         this.objectFactory = sqlType.supportsArrays()
@@ -111,9 +111,9 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
         ExceptionHandler<T, ID, Connection> exceptionHandler = (ExceptionHandler<T, ID, Connection>) repositoryInformation.getExceptionHandler();
         this.exceptionHandler = exceptionHandler == null ? new DefaultExceptionHandler<>() : exceptionHandler;
 
-        Logging.info("Creating QueryParseEngine for query generation for table " + repositoryInformation.getRepositoryName() + " with sqlType: " + sqlType.name() + '.');
+        Logging.info(() -> "Creating QueryParseEngine for query generation for table " + repositoryInformation.getRepositoryName() + " with sqlType: " + sqlType.name() + '.');
         this.engine = new QueryParseEngine(sqlType, repositoryInformation, resolverRegistry, dataSource);
-        Logging.info("Successfully created QueryParseEngine for table: " + repositoryInformation.getRepositoryName());
+        Logging.info(() -> "Successfully created QueryParseEngine for table: " + repositoryInformation.getRepositoryName());
 
         this.entityLifecycleListener = (EntityLifecycleListener<T>) repositoryInformation.getEntityLifecycleListener();
         this.auditLogger = (AuditLogger<T>) repositoryInformation.getAuditLogger();
@@ -127,7 +127,7 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
             this.readThroughCache = null;
         }
 
-        Logging.info("Advanced caching enabled: L2 Cache, Read-Through Cache, Prefetching Cache");
+        Logging.info(() -> "Advanced caching enabled: L2 Cache, Read-Through Cache, Prefetching Cache");
 
         // Initialize operation-based API support
         this.operationExecutor = new SQLOperationExecutor<>(this);
@@ -233,7 +233,7 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
         // Check L2 cache first
         T cached = l2Cache.get(key);
         if (cached != null) {
-            Logging.deepInfo("L2 cache hit for ID: " + key);
+            Logging.deepInfo(() -> "L2 cache hit for ID: " + key);
             return cached;
         }
         
@@ -278,13 +278,12 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
     }
 
     @Override
-    public CloseableIterator<T> findIterator(SelectQuery q) {
+    public @NotNull CloseableIterator<T> findIterator(SelectQuery q) {
         try {
             String sql = engine.parseSelect(q, false);
 
             return executeForIteration(
                 sql,
-                q,
                 q == null ? List.of() : q.filters(),
                 rs -> new ResultSetIterator<>(
                     rs,
@@ -306,13 +305,12 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
     }
 
     @Override
-    public Stream<T> findStream(SelectQuery q) {
+    public @NotNull Stream<T> findStream(SelectQuery q) {
         try {
             String sql = engine.parseSelect(q, false);
 
             return executeForIteration(
                 sql,
-                q,
                 q == null ? List.of() : q.filters(),
                 rs -> ResultSetIterator.stream(
                     rs,
@@ -335,7 +333,6 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
 
     private <R> R executeForIteration(
         String sql,
-        SelectQuery selectQuery,
         List<SelectOption> filters,
         Function<ResultSet, R> resultSetConsumer
     ) throws Exception {
@@ -466,7 +463,7 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
                     //noinspection DataFlowIssue
                     readThroughCache.invalidate(id);
                 }
-                Logging.deepInfo("Invalidated caches for entity ID: " + id);
+                Logging.deepInfo(() -> "Invalidated caches for entity ID: " + id);
             } catch (Exception e) {
                 Logging.error("Failed to invalidate cache: " + e.getMessage());
             }
@@ -699,7 +696,7 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
     }
 
     public TransactionResult<Boolean> executeRawQuery(final String query) {
-        Logging.info("Parsed query: " + query);
+        Logging.info(() -> "Parsed query: " + query);
         try (var connection = dataSource.getConnection();
              PreparedStatement statement = dataSource.prepareStatement(query, connection)) {
             return TransactionResult.success(statement.execute());
@@ -899,13 +896,14 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
             }
 
             Object value = fieldData.getValue(entity);
-            Logging.deepInfo("Processing field for update: " + fieldData.name() + " with value: " + value);
+            Object finalValue2 = value;
+            Logging.deepInfo(() -> "Processing field for update: " + fieldData.name() + " with value: " + finalValue2);
 
             // Handle relationship fields
             if ((fieldData.oneToOne() != null || fieldData.manyToOne() != null)) {
                 if (value == null) {
                     // If the relationship is null, we still need to set the foreign key to null
-                    Logging.deepInfo("  -> Relationship field is null, setting to NULL");
+                    Logging.deepInfo(() -> "  -> Relationship field is null, setting to NULL");
                 } else {
                     // For non-null relationships, get the ID from the related entity
                     RepositoryInformation relatedInfo = RepositoryMetadata.getMetadata(fieldData.type());
@@ -916,7 +914,8 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
                         }
 
                         value = pkField.getValue(value);
-                        Logging.deepInfo("  -> Relationship field, using ID for update: " + value);
+                        Object finalValue = value;
+                        Logging.deepInfo(() -> "  -> Relationship field, using ID for update: " + finalValue);
                     }
                 }
             }
@@ -942,11 +941,12 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
             }
 
             if (resolver == null) {
-                Logging.deepInfo("No resolver for " + fieldData.type() + ", assuming it's a relationship handled elsewhere.");
+                Logging.deepInfo(() -> "No resolver for " + fieldData.type() + ", assuming it's a relationship handled elsewhere.");
                 continue;
             }
 
-            Logging.deepInfo("Binding parameter " + fieldData.name() + ": " + value + " (type: " + (value != null ? value.getClass().getSimpleName() : "null") + ")");
+            Object finalValue1 = value;
+            Logging.deepInfo(() -> "Binding parameter " + fieldData.name() + ": " + finalValue1 + " (type: " + (finalValue1 != null ? finalValue1.getClass().getSimpleName() : "null") + ")");
             resolver.insert(statement, fieldData.name(), value);
         }
     }
@@ -983,7 +983,7 @@ public class AbstractRelationalRepositoryAdapter<T, ID> implements RepositoryAda
         try {
             RelationshipHandler<T, ID> handler = objectFactory.getRelationshipHandler();
             handler.invalidateRelationshipsForId(id);
-            Logging.deepInfo("Invalidated relationship cache for ID: " + id);
+            Logging.deepInfo(() -> "Invalidated relationship cache for ID: " + id);
         } catch (Exception e) {
             Logging.error("Failed to invalidate relationship cache for ID " + id + ": " + e.getMessage());
         }

@@ -139,6 +139,20 @@ public class FileRepositoryAdapter<T, ID> implements RepositoryAdapter<T, ID, Fi
         } catch (IOException e) {
             throw new RuntimeException("Failed to create base directory: " + basePath, e);
         }
+
+        try {
+            if (Files.exists(basePath)) {
+                return;
+            }
+            Files.createDirectories(basePath);
+            if (sharding) {
+                for (int i = 0; i < shardCount; i++) {
+                    Files.createDirectories(basePath.resolve(String.valueOf(i)));
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to create base directory: " + basePath, e);
+        }
     }
 
     public static <T, ID> FileRepositoryBuilder<T, ID> builder(@NotNull Class<T> entityType, @NotNull Class<ID> idType) {
@@ -486,24 +500,9 @@ public class FileRepositoryAdapter<T, ID> implements RepositoryAdapter<T, ID, Fi
         return basePath;
     }
 
-    // RepositoryAdapter interface implementation
-
     @Override
     public TransactionResult<Boolean> createRepository(boolean ifNotExists){
-        try {
-            if (ifNotExists && Files.exists(basePath)) {
-                return TransactionResult.success(true);
-            }
-            Files.createDirectories(basePath);
-            if (sharding) {
-                for (int i = 0; i < shardCount; i++) {
-                    Files.createDirectories(basePath.resolve(String.valueOf(i)));
-                }
-            }
-            return TransactionResult.success(true);
-        } catch (IOException e) {
-            return TransactionResult.failure(e);
-        }
+        return TransactionResult.success(true);
     }
 
     @Override

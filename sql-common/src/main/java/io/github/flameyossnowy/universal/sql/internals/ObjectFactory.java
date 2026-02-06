@@ -277,7 +277,8 @@ public sealed abstract class ObjectFactory<T, ID>
             TypeResolver<Object> resolver = getTypeResolverForField(field, valueToInsert);
             if (resolver == null) continue;
 
-            Logging.deepInfo("Binding " + field.name() + " -> " + valueToInsert);
+            Object finalValueToInsert = valueToInsert;
+            Logging.deepInfo(() ->"Binding " + field.name() + " -> " + finalValueToInsert);
             resolver.insert(stmt, field.name(), valueToInsert);
             paramIndex++;
         }

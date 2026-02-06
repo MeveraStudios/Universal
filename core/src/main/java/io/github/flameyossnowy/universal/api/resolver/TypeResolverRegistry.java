@@ -397,8 +397,7 @@ public class TypeResolverRegistry {
         registerInternal(new LocalDateTimeTypeResolver());
         registerInternal(new ZonedDateTimeTypeResolver());
         registerInternal(new OffsetDateTimeTypeResolver());
-        registerInternal(new InstantTypeResolver());
-        registerInternal(new EpochInstantTypeResolver());
+        registerInternal(new InstantResolver());
 
         registerInternal(new YearTypeResolver());
         registerInternal(new MonthTypeResolver());
@@ -823,30 +822,24 @@ public class TypeResolverRegistry {
         }
     }
 
-    public static final class InstantTypeResolver implements TypeResolver<Instant> {
+    public static final class InstantResolver implements TypeResolver<Instant> {
+
         @Override public Class<Instant> getType() { return Instant.class; }
-        @Override public Class<String> getDatabaseType() { return String.class; }
+        @Override public Class<?> getDatabaseType() { return Object.class; }
 
         @Override
-        public @Nullable Instant resolve(DatabaseResult result, String columnName) {
-            String value = result.get(columnName, String.class);
-            return value != null ? Instant.parse(value) : null;
-        }
+        public Instant resolve(DatabaseResult result, String columnName) {
+            Object raw = result.get(columnName, Object.class);
 
-        @Override
-        public void insert(DatabaseParameters parameters, String index, Instant value) {
-            parameters.set(index, value != null ? value.toString() : null, String.class);
-        }
-    }
-
-    public static final class EpochInstantTypeResolver implements TypeResolver<Instant> {
-        @Override public Class<Instant> getType() { return Instant.class; }
-        @Override public Class<Long> getDatabaseType() { return Long.class; }
-
-        @Override
-        public @Nullable Instant resolve(DatabaseResult result, String columnName) {
-            Long value = result.get(columnName, Long.class);
-            return value != null ? Instant.ofEpochMilli(value) : null;
+            return switch (raw) {
+                case null -> null;
+                case Long l -> Instant.ofEpochMilli(l);
+                case String s -> Instant.parse(s);
+                case java.util.Date d -> d.toInstant();
+                default -> throw new IllegalStateException(
+                    "Unsupported Instant storage type: " + raw.getClass()
+                );
+            };
         }
 
         @Override

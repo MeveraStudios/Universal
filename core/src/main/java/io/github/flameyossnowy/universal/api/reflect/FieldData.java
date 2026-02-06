@@ -323,7 +323,7 @@ public class FieldData<T> {
         }
     }
 
-    public <T extends Annotation> T getAnnotation(Class<T> clazz) {
+    public <E extends Annotation> E getAnnotation(Class<E> clazz) {
         return rawField.getAnnotation(clazz);
     }
 

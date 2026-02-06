@@ -163,7 +163,7 @@ public abstract class AbstractRelationshipHandler<T, ID, R> implements Relations
                     return field.name();
             }
             // If not found, fall back to primary key (safeguard) — caller should probably fail earlier
-            Logging.deepInfo("Relation name for parent type " + parentType.getName() + " not found in " + info.getRepositoryName());
+            Logging.deepInfo(() -> "Relation name for parent type " + parentType.getName() + " not found in " + info.getRepositoryName());
             return primaryKey.name();
         });
     }
@@ -200,7 +200,7 @@ public abstract class AbstractRelationshipHandler<T, ID, R> implements Relations
                 return null;
             }
 
-            Logging.deepInfo("Using external adapter '" + adapterName + "' for field " + field.name());
+            Logging.deepInfo(() -> "Using external adapter '" + adapterName + "' for field " + field.name());
             return externalAdapter;
         }
 

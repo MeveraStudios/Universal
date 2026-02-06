@@ -37,15 +37,16 @@ public record MongoQueryValidator(RepositoryInformation repositoryInformation) i
 
     @Override
     public ValidationEstimation validateSelectQuery(SelectQuery query) {
+        int limit = query.limit();
         // Validate limit
-        if (query.limit() < 0) {
+        if (limit < 0 && limit != -1) {
             return ValidationEstimation.fail("Limit must be greater than 0");
         }
 
         // MongoDB supports very large limits, but warn for extremely large values
-        if (query.limit() > 100000) {
+        if (limit > 100000) {
             Logging.warn(
-                "Limit of " + query.limit() + " is very large and may cause memory issues. " +
+                "Limit of " + limit + " is very large and may cause memory issues. " +
                 "Consider using pagination or reducing the limit."
             );
         }
@@ -54,8 +55,8 @@ public record MongoQueryValidator(RepositoryInformation repositoryInformation) i
         List<SelectOption> filters = query.filters();
         for (SelectOption filter : filters) {
             // Validate field exists
-            FieldData<?> field = repositoryInformation.getField(filter.option());
-            ValidationEstimation validationEstimation = getValidationEstimation(filter, field);
+            var field = repositoryInformation.getField(filter.option());
+            var validationEstimation = getValidationEstimation(filter, field);
             if (validationEstimation != null) return validationEstimation;
 
             // Validate operator
@@ -77,21 +78,22 @@ public record MongoQueryValidator(RepositoryInformation repositoryInformation) i
                 );
             }
 
-            String value = filter.value().toString();
-            ValidationEstimation regexValidation = validateRegex(filter, operator, value);
+            var value = filter.value().toString();
+            var regexValidation = validateRegex(filter, operator, value);
             if (regexValidation != null) return regexValidation;
         }
 
         // Validate sort options
-        ValidationEstimation sortOption = validateSortOptions(query);
+        var sortOption = validateSortOptions(query);
         if (sortOption != null) return sortOption;
 
-        if (query.columns().isEmpty()) {
+        var columns = query.columns();
+        if (columns.isEmpty()) {
             return ValidationEstimation.PASS;
         }
 
-        for (String column : query.columns()) {
-            FieldData<?> field = repositoryInformation.getField(column);
+        for (String column : columns) {
+            var field = repositoryInformation.getField(column);
             if (field == null) return ValidationEstimation.fail("Selected column '" + column + "' does not exist in schema");
         }
 

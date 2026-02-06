@@ -1,16 +1,22 @@
 package io.github.flameyossnowy.universal.mongodb;
 
 import io.github.flameyossnowy.universal.api.RepositoryRegistry;
+import io.github.flameyossnowy.universal.api.annotations.OneToOne;
 import io.github.flameyossnowy.universal.api.exceptions.ConstructorThrewException;
 import io.github.flameyossnowy.universal.api.options.Query;
 import io.github.flameyossnowy.universal.api.options.SelectQuery;
 import io.github.flameyossnowy.universal.api.reflect.FieldData;
 import io.github.flameyossnowy.universal.api.reflect.RepositoryInformation;
 import io.github.flameyossnowy.universal.api.reflect.RepositoryMetadata;
+import io.github.flameyossnowy.universal.api.resolver.TypeResolverRegistry;
+import io.github.flameyossnowy.universal.api.utils.Logging;
 import io.github.flameyossnowy.universal.mongodb.codec.MongoTypeCodec;
+import io.github.flameyossnowy.universal.mongodb.result.MongoDatabaseResult;
 import org.bson.Document;
 import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.RecordComponent;
@@ -21,12 +27,25 @@ import java.util.*;
 public class ObjectFactory<T, ID> {
 
     private final RepositoryInformation repoInfo;
+    private final TypeResolverRegistry typeResolverRegistry;
     private final boolean isRecord;
     private final RecordComponent[] recordComponents;
 
+    // Thread-local loading context to prevent infinite recursion
+    private static final ThreadLocal<Set<LoadingKey>> LOADING_CONTEXT =
+        ThreadLocal.withInitial(HashSet::new);
+
+    private record LoadingKey(Class<?> entityType, Object entityId) {}
+
     @SuppressWarnings("unused")
-    public ObjectFactory(@NotNull RepositoryInformation repoInfo, Class<T> type, Class<ID> idClass) {
+    public ObjectFactory(
+        @NotNull RepositoryInformation repoInfo,
+        @NotNull TypeResolverRegistry typeResolverRegistry,
+        Class<T> type,
+        Class<ID> idClass
+    ) {
         this.repoInfo = repoInfo;
+        this.typeResolverRegistry = typeResolverRegistry;
         this.isRecord = repoInfo.isRecord();
         this.recordComponents = isRecord ? repoInfo.getRecordComponents() : null;
 
@@ -40,18 +59,65 @@ public class ObjectFactory<T, ID> {
     }
 
     public Document toDocument(Object entity) {
+        if (entity == null) {
+            throw new IllegalArgumentException("Cannot convert null entity to Document");
+        }
+
         Document doc = new Document();
 
         for (FieldData<?> field : repoInfo.getFields()) {
-            if (field.manyToOne() != null || field.oneToMany() != null || field.oneToOne() != null) continue;
-            
-            // Set field context for codec to use
+            // Skip OneToMany - they don't get stored in the parent document
+            if (field.oneToMany() != null) continue;
+
             MongoTypeCodec.setCurrentFieldName(field.name());
             try {
-                Object value = field.getValue(entity);
-                doc.put(field.name(), value);
+                Object value;
+
+                // For ManyToOne, store the ID value in the field name itself
+                if (field.manyToOne() != null) {
+                    Object relatedEntity = field.getValue(entity);
+                    if (relatedEntity != null) {
+                        RepositoryInformation relatedInfo = RepositoryMetadata.getMetadata(field.type());
+                        if (relatedInfo != null && relatedInfo.getPrimaryKey() != null) {
+                            // Store the ID value using the field name directly
+                            Object foreignKeyValue = relatedInfo.getPrimaryKey().getValue(relatedEntity);
+                            doc.put(field.name(), foreignKeyValue);
+                        }
+                    }
+                    continue;
+                }
+
+                // For OneToOne owning side, store the ID value in the field name itself
+                if (field.oneToOne() != null) {
+                    OneToOne oneToOne = field.oneToOne();
+                    // Only owning side (has join column, no mappedBy) stores the FK
+                    if (oneToOne.mappedBy().isEmpty()) {
+                        Object relatedEntity = field.getValue(entity);
+                        if (relatedEntity != null) {
+                            RepositoryInformation relatedInfo = RepositoryMetadata.getMetadata(field.type());
+                            if (relatedInfo != null && relatedInfo.getPrimaryKey() != null) {
+                                // Store the ID value using the field name directly
+                                Object foreignKeyValue = relatedInfo.getPrimaryKey().getValue(relatedEntity);
+                                doc.put(field.name(), foreignKeyValue);
+                            }
+                        }
+                    }
+                    // Inverse side (has mappedBy) doesn't store anything
+                    continue;
+                }
+
+                value = field.getValue(entity);
+
+                // Store primary key as "_id" in MongoDB for proper indexing
+                if (field.primary()) {
+                    doc.put("_id", value);
+                    if (!field.name().equals("_id")) {
+                        doc.put(field.name(), value);
+                    }
+                } else {
+                    doc.put(field.name(), value);
+                }
             } finally {
-                // Always clear the ThreadLocal to prevent leaks
                 MongoTypeCodec.setCurrentFieldName(null);
             }
         }
@@ -59,147 +125,268 @@ public class ObjectFactory<T, ID> {
         return doc;
     }
 
-    public T fromDocument(Document doc) {
+    @Nullable
+    public T fromDocument(@Nullable Document doc) {
+        if (doc == null) {
+            return null;
+        }
+
         if (isRecord) {
-            int length = recordComponents.length;
-            Object[] args = new Object[length];
-            for (int index = 0; index < length; index++) {
-                RecordComponent rc = recordComponents[index];
-                String fieldName = rc.getName();
-                
-                // Set field context for codec to use during deserialization
-                io.github.flameyossnowy.universal.mongodb.codec.MongoTypeCodec.setCurrentFieldName(fieldName);
-                try {
-                    args[index] = doc.get(fieldName);
-                } finally {
-                    io.github.flameyossnowy.universal.mongodb.codec.MongoTypeCodec.setCurrentFieldName(null);
-                }
-            }
+            return fromDocumentRecord(doc);
+        }
+
+        return fromDocumentClass(doc);
+    }
+
+    private @NotNull T fromDocumentRecord(@NotNull Document doc) {
+        int length = recordComponents.length;
+        Object[] args = new Object[length];
+
+        for (int index = 0; index < length; index++) {
+            RecordComponent rc = recordComponents[index];
+            String fieldName = rc.getName();
+
+            MongoTypeCodec.setCurrentFieldName(fieldName);
             try {
-                return (T) repoInfo.getRecordConstructor().newInstance(args);
-            } catch (InstantiationException | IllegalAccessException e) {
-                throw new RuntimeException(e);
-            } catch (InvocationTargetException e) {
-                throw new ConstructorThrewException(e.getMessage());
+                Object value = doc.get(fieldName);
+                if (value == null && isPrimaryKeyField(fieldName)) {
+                    value = doc.get("_id");
+                }
+
+                FieldData<?> field = repoInfo.getField(fieldName);
+                args[index] = field != null ? coerceValue(field, doc, value) : value;
+            } finally {
+                MongoTypeCodec.setCurrentFieldName(null);
             }
         }
 
+        try {
+            return (T) repoInfo.getRecordConstructor().newInstance(args);
+        } catch (InstantiationException | IllegalAccessException e) {
+            throw new RuntimeException("Failed to instantiate record: " + repoInfo.getType().getName(), e);
+        } catch (InvocationTargetException e) {
+            throw new ConstructorThrewException("Record constructor threw exception: " + e.getMessage());
+        }
+    }
+
+    private @NotNull T fromDocumentClass(@NotNull Document doc) {
         T entity = (T) repoInfo.newInstance();
         ID entityId = null;
 
+        // First pass: non-relationship fields
         for (FieldData<?> field : repoInfo.getFields()) {
-            String fieldName = field.name();
-            
-            // Set field context for codec to use during deserialization
-            io.github.flameyossnowy.universal.mongodb.codec.MongoTypeCodec.setCurrentFieldName(fieldName);
-            try {
-                Object value = doc.get(fieldName);
+            if (field.manyToOne() != null || field.oneToOne() != null || field.oneToMany() != null) {
+                continue;
+            }
 
-                if (field.primary()) {
-                    entityId = (ID) value;
-                    field.setValue(entity, value);
-                    continue;
-                }
+            Object value = doc.get(field.name());
+            if (value == null && field.primary()) {
+                value = doc.get("_id");
+            }
 
-                if (field.manyToOne() != null) {
-                    loadManyToOne(field, entity, entityId);
-                    continue;
-                }
+            value = coerceValue(field, doc, value);
 
-                if (field.oneToOne() != null) {
-                    loadOneToOne(field, entity, entityId);
-                    continue;
-                }
+            if (field.primary()) {
+                entityId = (ID) value;
+            }
 
-                if (field.oneToMany() != null) {
-                    loadOneToMany(field, entity, value);
-                    continue;
-                }
-
+            if (value != null) {
                 field.setValue(entity, value);
-            } finally {
-                io.github.flameyossnowy.universal.mongodb.codec.MongoTypeCodec.setCurrentFieldName(null);
+            }
+        }
+
+        LoadingKey loadingKey = new LoadingKey(repoInfo.getType(), entityId);
+        Set<LoadingKey> loadingContext = LOADING_CONTEXT.get();
+        boolean added = loadingContext.add(loadingKey);
+
+        try {
+            for (FieldData<?> field : repoInfo.getFields()) {
+                if (field.manyToOne() != null) {
+                    loadManyToOne(field, entity, doc, loadingContext);
+                } else if (field.oneToOne() != null) {
+                    loadOneToOne(field, entity, doc, entityId, loadingContext);
+                } else if (field.oneToMany() != null) {
+                    loadOneToMany(field, entity, entityId, loadingContext);
+                }
+            }
+        } finally {
+            if (added) {
+                loadingContext.remove(loadingKey);
+                if (loadingContext.isEmpty()) {
+                    LOADING_CONTEXT.remove();
+                }
             }
         }
 
         return entity;
     }
 
-    private void loadManyToOne(FieldData<?> field, Object entity, ID id) {
+    @Contract("_, _, null -> null")
+    private @Nullable Object coerceValue(@NotNull FieldData<?> field, @NotNull Document doc, @Nullable Object value) {
+        if (value == null) return null;
+
+        Class<?> targetType = field.type();
+        if (targetType.isInstance(value)) {
+            return value;
+        }
+
+        if (targetType.isPrimitive()) {
+            switch (value) {
+                case Number n when targetType == int.class -> {
+                    return n.intValue();
+                }
+                case Number n when targetType == long.class -> {
+                    return n.longValue();
+                }
+                case Number n when targetType == double.class -> {
+                    return n.doubleValue();
+                }
+                case Number n when targetType == float.class -> {
+                    return n.floatValue();
+                }
+                case Number n when targetType == short.class -> {
+                    return n.shortValue();
+                }
+                case Number n when targetType == byte.class -> {
+                    return n.byteValue();
+                }
+                case Boolean b when targetType == boolean.class -> {
+                    return b;
+                }
+                case Character c when targetType == char.class -> {
+                    return c;
+                }
+                case String s when targetType == char.class && s.length() == 1 -> {
+                    return s.charAt(0);
+                }
+                default -> {
+                }
+            }
+        }
+
+        if (Number.class.isAssignableFrom(targetType) && value instanceof Number n) {
+            if (targetType == Integer.class) return n.intValue();
+            if (targetType == Long.class) return n.longValue();
+            if (targetType == Double.class) return n.doubleValue();
+            if (targetType == Float.class) return n.floatValue();
+            if (targetType == Short.class) return n.shortValue();
+            if (targetType == Byte.class) return n.byteValue();
+        }
+
+        if (typeResolverRegistry != null && typeResolverRegistry.hasResolver(targetType)) {
+            return typeResolverRegistry.resolve(targetType).resolve(new MongoDatabaseResult(doc), field.name());
+        }
+
+        return value;
+    }
+
+    private boolean isPrimaryKeyField(String fieldName) {
+        for (FieldData<?> field : repoInfo.getFields()) {
+            if (field.name().equals(fieldName) && field.primary()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void loadManyToOne(
+        FieldData<?> field,
+        Object entity,
+        Document doc,
+        Set<LoadingKey> loadingContext
+    ) {
+        Object foreignKeyValue = doc.get(field.name());
+        if (foreignKeyValue == null) return;
+
+        LoadingKey key = new LoadingKey(field.type(), foreignKeyValue);
+        if (loadingContext.contains(key)) return;
+
         var adapter = RepositoryRegistry.get(field.type());
         if (adapter == null) return;
 
-        Object result = adapter.first(Query.select().where(field.name(), id).build());
-        if (result != null) field.setValue(entity, result);
+        Object result = adapter.first(
+            Query.select().where("_id", foreignKeyValue).build()
+        );
+
+        if (result != null) {
+            field.setValue(entity, result);
+        }
     }
 
-    private void loadOneToOne(@NotNull FieldData<?> field, @NotNull Object entity, ID id) {
-        RepositoryInformation metadata = RepositoryMetadata.getMetadata(entity.getClass());
+    private void loadOneToOne(
+        FieldData<?> field,
+        Object entity,
+        Document doc,
+        ID id,
+        Set<LoadingKey> loadingContext
+    ) {
+        if (id == null) return;
+
         var adapter = RepositoryRegistry.get(field.type());
         if (adapter == null) return;
 
-        RepositoryInformation repositoryInformation = adapter.getRepositoryInformation();
-        SelectQuery filter = createOneToManyFilter(repositoryInformation, id);
-        Object document = adapter.first(filter);
-        Object child = instantiateChildOneToOne(document, repositoryInformation, entity, metadata);
-        field.setValue(entity, child);
+        OneToOne oneToOne = field.oneToOne();
+        RepositoryInformation targetInfo = adapter.getRepositoryInformation();
+
+        // Inverse side
+        if (!oneToOne.mappedBy().isEmpty()) {
+            FieldData<?> owningField = targetInfo.getField(oneToOne.mappedBy());
+            if (owningField == null) return;
+
+            Object child = adapter.first(
+                Query.select().where(owningField.name(), id).build()
+            );
+
+            if (child != null) {
+                field.setValue(entity, child);
+            }
+            return;
+        }
+
+        // Owning side
+        Object foreignKeyValue = doc.get(field.name());
+        if (foreignKeyValue == null) return;
+
+        LoadingKey key = new LoadingKey(field.type(), foreignKeyValue);
+        if (loadingContext.contains(key)) return;
+
+        Object child = adapter.first(
+            Query.select().where("_id", foreignKeyValue).build()
+        );
+
+        if (child != null) {
+            field.setValue(entity, child);
+        }
     }
 
-    private void loadOneToMany(@NotNull FieldData<?> field, Object parentEntity, Object parentId) {
+    private void loadOneToMany(
+        FieldData<?> field,
+        Object parentEntity,
+        ID parentId,
+        Set<LoadingKey> loadingContext
+    ) {
+        if (parentId == null) return;
+
         Class<?> childType = field.oneToMany().mappedBy();
         RepositoryInformation childInfo = RepositoryMetadata.getMetadata(childType);
-        Objects.requireNonNull(childInfo, "Child repository metadata not found for type: " + childType);
-
         var adapter = RepositoryRegistry.get(childType);
         if (adapter == null) return;
 
-        SelectQuery filter = createOneToManyFilter(childInfo, parentId);
-        List<Object> parentList = (List<Object>) adapter.find(filter);
-        List<Object> children = new ArrayList<>(parentList.size());
+        FieldData<?> manyToOneField =
+            childInfo.getManyToOneFieldFor(parentEntity.getClass());
 
-        for (Object childObject : parentList) {
-            Object child = instantiateChildManyToOne(childObject, childInfo, parentEntity, childInfo);
+        if (manyToOneField == null) return;
+
+        SelectQuery query = Query.select()
+            .where(manyToOneField.name(), parentId)
+            .build();
+
+        List<Object> children = new ArrayList<>();
+        for (Object child : adapter.find(query)) {
+            manyToOneField.setValue(child, parentEntity);
             children.add(child);
         }
 
         field.setValue(parentEntity, children);
-    }
-
-    private static @NotNull Object instantiateChildManyToOne(
-            Object doc, @NotNull RepositoryInformation childInfo,
-            Object parentEntity, RepositoryInformation info
-    ) {
-        Object child = childInfo.newInstance();
-        for (FieldData<?> field : childInfo.getFields()) {
-            if (field.manyToOne() != null) {
-                field.setValue(child, parentEntity);
-            } else {
-                field.setValue(child, info.getField(field.name()).getValue(doc));
-            }
-        }
-        return child;
-    }
-
-    private static @NotNull Object instantiateChildOneToOne(
-            Object doc, RepositoryInformation childInfo,
-            Object parentEntity, RepositoryInformation info
-    ) {
-        Object child = childInfo.newInstance();
-        for (FieldData<?> field : childInfo.getFields()) {
-            if (field.oneToOne() != null) {
-                field.setValue(child, parentEntity);
-            } else {
-                field.setValue(child, info.getField(field.name()).getValue(doc));
-            }
-        }
-        return child;
-    }
-
-    private @NotNull SelectQuery createOneToManyFilter(RepositoryInformation childInfo, Object parentId) {
-        return childInfo.getManyToOneCache().values().stream()
-                .filter(field -> field.type() == repoInfo.getType())
-                .findFirst()
-                .map(field -> Query.select().where(field.name(), parentId).build())
-                .orElseThrow(() -> new IllegalArgumentException("No matching many-to-one field found in " + childInfo.getType()));
     }
 }

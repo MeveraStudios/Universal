@@ -224,4 +224,25 @@ public class RepositoryInformation {
     public void addPrimaryKey(FieldData<?> fieldData) {
         primaryKeys.add(fieldData);
     }
+
+    @Nullable
+    public FieldData<?> getManyToOneFieldFor(@NotNull Class<?> parentType) {
+        FieldData<?> match = null;
+
+        for (FieldData<?> field : manyToOneFields.values()) {
+            Class<?> fieldType = field.type();
+
+            if (fieldType.equals(parentType)) {
+                if (match != null) {
+                    throw new RepositoryException(
+                        "Multiple @ManyToOne fields in " + entityClass.getSimpleName() +
+                            " reference " + parentType.getSimpleName()
+                    );
+                }
+                match = field;
+            }
+        }
+
+        return match;
+    }
 }
