@@ -19,7 +19,7 @@ public class Main {
     public static void main(String[] args) {
         MongoClientSettings settings = MongoClientSettings.builder()
             .applyConnectionString(new ConnectionString(
-                "mongodb+srv://flameyosflow:87654321@testingjava.vmol6.mongodb.net/?retryWrites=true&w=majority&appName=TestingJava&ssl=false"
+                "mongodb+srv://flameyosflow:...@testingjava.vmol6.mongodb.net/?retryWrites=true&w=majority&appName=TestingJava&ssl=false"
             ))
             .build();
         MongoRepositoryAdapter<User, UUID> adapter = MongoRepositoryAdapter
